@@ -10,9 +10,10 @@ function App() {
   ]);
 
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const sendMessage = async (message = input) => {
-    if (!message.trim()) return;
+    if (!message.trim() || loading) return;
 
     // Show user message
     setMessages((previous) => [
@@ -24,9 +25,9 @@ function App() {
     ]);
 
     setInput("");
+    setLoading(true);
 
     try {
-      // Send message to Spring Boot
       const response = await fetch("http://localhost:8083/api/chat", {
         method: "POST",
         headers: {
@@ -39,17 +40,61 @@ function App() {
         throw new Error("Backend request failed");
       }
 
-      // Get AI response from backend
-      const botResponse = await response.text();
+      // Check if browser supports streaming response
+      if (!response.body) {
+        throw new Error("Streaming is not supported by this response");
+      }
 
-      // Show bot response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      // Create an empty bot message first
       setMessages((previous) => [
         ...previous,
         {
-          text: botResponse,
+          text: "",
           sender: "bot",
         },
       ]);
+
+      let botMessage = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) break;
+
+        // Convert received bytes to text
+        const chunk = decoder.decode(value, { stream: true });
+
+        botMessage += chunk;
+
+        // Update the last bot message as chunks arrive
+        setMessages((previous) => {
+          const updatedMessages = [...previous];
+
+          updatedMessages[updatedMessages.length - 1] = {
+            text: botMessage,
+            sender: "bot",
+          };
+
+          return updatedMessages;
+        });
+      }
+
+      // Flush any remaining decoder data
+      botMessage += decoder.decode();
+
+      setMessages((previous) => {
+        const updatedMessages = [...previous];
+
+        updatedMessages[updatedMessages.length - 1] = {
+          text: botMessage,
+          sender: "bot",
+        };
+
+        return updatedMessages;
+      });
     } catch (error) {
       console.error("Error:", error);
 
@@ -60,6 +105,8 @@ function App() {
           sender: "bot",
         },
       ]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -69,75 +116,97 @@ function App() {
   };
 
   return (
-      <div className="app">
-        <div className="chat-container">
+    <div className="app">
+      <div className="chat-container">
 
-          {/* Header */}
-          <div className="header">
-            <div className="logo">R</div>
+        {/* Header */}
+        <div className="header">
+          <div className="logo">R</div>
 
-            <div>
-              <h2>Rhythm</h2>
-              <p>Food Delivery Support</p>
+          <div>
+            <h2>Rhythm</h2>
+            <p>Food Delivery Support</p>
+          </div>
+
+          <span className="online">● Online</span>
+        </div>
+
+        {/* Messages */}
+        <div className="messages">
+          {messages.map((message, index) => (
+            <div
+              key={index}
+              className={`message-row ${message.sender}`}
+            >
+              <div className="message">
+                {message.text}
+              </div>
             </div>
+          ))}
 
-            <span className="online">● Online</span>
-          </div>
+          {loading && (
+            <div className="message-row bot">
+              <div className="message">
+                <span className="typing">● ● ●</span>
+              </div>
+            </div>
+          )}
+        </div>
 
-          {/* Messages */}
-          <div className="messages">
-            {messages.map((message, index) => (
-                <div
-                    key={index}
-                    className={`message-row ${message.sender}`}
-                >
-                  <div className="message">
-                    {message.text}
-                  </div>
-                </div>
-            ))}
-          </div>
+        {/* Quick Buttons */}
+        <div className="quick-buttons">
 
-          {/* Quick Buttons */}
-          <div className="quick-buttons">
+          <button
+            onClick={() => sendMessage("Track Order")}
+            disabled={loading}
+          >
+            Track Order
+          </button>
 
-            <button onClick={() => sendMessage("Track Order")}>
-              Track Order
-            </button>
+          <button
+            onClick={() => sendMessage("Cancel Order")}
+            disabled={loading}
+          >
+            Cancel Order
+          </button>
 
-            <button onClick={() => sendMessage("Cancel Order")}>
-              Cancel Order
-            </button>
+          <button
+            onClick={() => sendMessage("Refund")}
+            disabled={loading}
+          >
+            Refund
+          </button>
 
-            <button onClick={() => sendMessage("Refund")}>
-              Refund
-            </button>
-
-            <button onClick={() => sendMessage("Missing Item")}>
-              Missing Item
-            </button>
-
-          </div>
-
-          {/* Input */}
-          <form className="input-area" onSubmit={handleSubmit}>
-
-            <input
-                type="text"
-                placeholder="Type your message..."
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-            />
-
-            <button type="submit">
-              Send
-            </button>
-
-          </form>
+          <button
+            onClick={() => sendMessage("Missing Item")}
+            disabled={loading}
+          >
+            Missing Item
+          </button>
 
         </div>
+
+        {/* Input */}
+        <form className="input-area" onSubmit={handleSubmit}>
+
+          <input
+            type="text"
+            placeholder="Type your message..."
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            disabled={loading}
+          />
+
+          <button type="submit" disabled={loading}>
+            {loading ? "..." : "Send"}
+          </button>
+
+        </form>
+
       </div>
+    </div>
   );
 }
 
 export default App;
+
